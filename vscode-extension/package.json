@@ -1,0 +1,127 @@
+{
+    "name": "prismify",
+    "displayName": "Prismify - AI Code Beautifier",
+    "description": "AI-powered code beautification that goes beyond syntax formatting",
+    "version": "1.0.0",
+    "publisher": "prismify",
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "categories": [
+        "Formatters",
+        "Linters",
+        "Other"
+    ],
+    "keywords": [
+        "beautify",
+        "format",
+        "refactor",
+        "ai",
+        "rename",
+        "clean code"
+    ],
+    "activationEvents": [
+        "onLanguage:javascript",
+        "onLanguage:typescript",
+        "onLanguage:python",
+        "onLanguage:java"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "prismify.beautify",
+                "title": "Prismify: Beautify Current File"
+            },
+            {
+                "command": "prismify.beautifyWithOptions",
+                "title": "Prismify: Beautify with Options..."
+            },
+            {
+                "command": "prismify.detectStyle",
+                "title": "Prismify: Detect Code Style"
+            },
+            {
+                "command": "prismify.explain",
+                "title": "Prismify: Add Explanatory Comments"
+            }
+        ],
+        "configuration": {
+            "title": "Prismify",
+            "properties": {
+                "prismify.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable Prismify"
+                },
+                "prismify.styleProfile": {
+                    "type": "string",
+                    "default": "airbnb",
+                    "enum": [
+                        "google",
+                        "airbnb",
+                        "minimal",
+                        "python",
+                        "competitive"
+                    ],
+                    "description": "Default style profile"
+                },
+                "prismify.formatOnSave": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Run Prismify on save"
+                },
+                "prismify.aiProvider": {
+                    "type": "string",
+                    "default": "auto",
+                    "enum": [
+                        "ollama",
+                        "mock",
+                        "auto"
+                    ],
+                    "description": "AI provider for naming suggestions"
+                },
+                "prismify.explainLevel": {
+                    "type": "string",
+                    "default": "production",
+                    "enum": [
+                        "beginner",
+                        "pr-review",
+                        "production"
+                    ],
+                    "description": "Explanation detail level"
+                }
+            }
+        },
+        "menus": {
+            "editor/context": [
+                {
+                    "command": "prismify.beautify",
+                    "when": "resourceLangId =~ /javascript|typescript|python|java/",
+                    "group": "1_modification"
+                }
+            ]
+        },
+        "keybindings": [
+            {
+                "command": "prismify.beautify",
+                "key": "ctrl+shift+p",
+                "mac": "cmd+shift+p",
+                "when": "editorTextFocus"
+            }
+        ]
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.80.0",
+        "@types/node": "^18.0.0",
+        "typescript": "^5.0.0"
+    },
+    "dependencies": {
+        "prismify": "^1.0.0"
+    }
+}

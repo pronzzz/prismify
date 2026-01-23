@@ -1,0 +1,48 @@
+{
+    "name": "prismify",
+    "version": "1.0.0",
+    "description": "AI-powered code beautification engine that goes beyond syntax formatting",
+    "type": "module",
+    "main": "dist/index.js",
+    "bin": {
+        "prismify": "dist/index.js"
+    },
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsx src/index.ts",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "lint": "eslint src --ext .ts"
+    },
+    "keywords": [
+        "code-beautifier",
+        "ai",
+        "refactoring",
+        "clean-code",
+        "developer-tools"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "@babel/parser": "^7.23.0",
+        "@babel/traverse": "^7.23.0",
+        "@babel/generator": "^7.23.0",
+        "@babel/types": "^7.23.0",
+        "chalk": "^5.3.0",
+        "commander": "^11.1.0",
+        "diff": "^5.1.0",
+        "ollama": "^0.5.0",
+        "prettier": "^3.1.0"
+    },
+    "devDependencies": {
+        "@types/babel__traverse": "^7.20.0",
+        "@types/diff": "^5.0.0",
+        "@types/node": "^20.10.0",
+        "tsx": "^4.6.0",
+        "typescript": "^5.3.0",
+        "vitest": "^1.0.0"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
+}
