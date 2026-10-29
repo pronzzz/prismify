@@ -1,47 +1,38 @@
 /**
- * AI Provider Factory
- * 
- * Creates the appropriate AI provider based on availability and configuration.
+ * Provider selection.
  */
 
 import type { AIProvider } from '../types/index.js';
-import { OllamaProvider } from './ollama.js';
-import { MockProvider } from './mock.js';
+import { HeuristicProvider } from './heuristic.js';
+import { OllamaProvider, type OllamaOptions } from './ollama.js';
 
-export type ProviderType = 'ollama' | 'mock' | 'auto';
+export type ProviderType = 'auto' | 'ollama' | 'heuristic';
 
-/**
- * Create an AI provider
- * 
- * @param type - Provider type or 'auto' to auto-detect
- * @returns AI provider instance
- */
-export async function createProvider(type: ProviderType = 'auto'): Promise<AIProvider> {
-    if (type === 'mock') {
-        return new MockProvider();
-    }
-
-    if (type === 'ollama') {
-        const provider = new OllamaProvider();
-        if (await provider.isAvailable()) {
-            return provider;
-        }
-        throw new Error('Ollama is not available. Make sure Ollama is running (ollama serve)');
-    }
-
-    // Auto-detect: try Ollama first, fall back to mock
-    if (type === 'auto') {
-        const ollama = new OllamaProvider();
-        if (await ollama.isAvailable()) {
-            console.log('Using Ollama for AI-powered naming suggestions');
-            return ollama;
-        }
-        console.log('Ollama not available, using heuristic naming (install Ollama for AI features)');
-        return new MockProvider();
-    }
-
-    throw new Error(`Unknown provider type: ${type}`);
+export function parseProvider(input: string): ProviderType | null {
+    const v = input.toLowerCase();
+    if (v === 'mock' || v === 'offline' || v === 'none') return 'heuristic';
+    if (v === 'auto' || v === 'ollama' || v === 'heuristic') return v;
+    return null;
 }
 
-export { OllamaProvider } from './ollama.js';
-export { MockProvider } from './mock.js';
+/**
+ * Create a provider.
+ * - `heuristic`: offline rules only.
+ * - `ollama`: requires a running Ollama; throws with a helpful message otherwise.
+ * - `auto`: Ollama if reachable, otherwise heuristics (with a notice explaining why).
+ */
+export async function createProvider(
+    type: ProviderType = 'auto',
+    opts: OllamaOptions = {}
+): Promise<{ provider: AIProvider; notice?: string }> {
+    if (type === 'heuristic') return { provider: new HeuristicProvider() };
+    if (type === 'ollama') return { provider: await OllamaProvider.connect(opts) };
+    try {
+        return { provider: await OllamaProvider.connect({ connectTimeoutMs: 1200, ...opts }) };
+    } catch (error: any) {
+        return { provider: new HeuristicProvider(), notice: `${error.message} Using offline heuristics.` };
+    }
+}
+
+export { HeuristicProvider } from './heuristic.js';
+export { OllamaProvider, DEFAULT_OLLAMA_HOST, type OllamaOptions } from './ollama.js';

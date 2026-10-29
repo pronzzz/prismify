@@ -64,7 +64,7 @@ export interface StyleProfile {
     /** Trailing commas */
     trailingCommas: 'none' | 'es5' | 'all';
 
-    /** Min variable name length */
+    /** Names shorter than this are rename candidates (1 disables length-based renaming). */
     minNameLength: number;
 
     /** Max variable name length */
@@ -157,8 +157,30 @@ export const STYLE_PROFILES: Record<string, StyleProfile> = {
         indentStyle: 'spaces',
         indentSize: 4,
         semicolons: false,
-        quotes: 'single',
+        quotes: 'double',
         trailingCommas: 'all',
+        minNameLength: 2,
+        maxNameLength: 30,
+    },
+
+    java: {
+        name: 'java',
+        description: 'Common Java conventions (4-space indent)',
+        variableNaming: 'camelCase',
+        functionNaming: 'camelCase',
+        classNaming: 'PascalCase',
+        constantNaming: 'SCREAMING_SNAKE',
+        preferEarlyReturns: true,
+        preferTernary: false,
+        maxNestingDepth: 3,
+        preferConst: true,
+        preferArrowFunctions: false,
+        maxLineLength: 100,
+        indentStyle: 'spaces',
+        indentSize: 4,
+        semicolons: true,
+        quotes: 'double',
+        trailingCommas: 'none',
         minNameLength: 2,
         maxNameLength: 30,
     },
@@ -186,10 +208,15 @@ export const STYLE_PROFILES: Record<string, StyleProfile> = {
     },
 };
 
-/**
- * Default profile
- */
+/** Default profile for JavaScript and TypeScript. */
 export const DEFAULT_PROFILE = STYLE_PROFILES.airbnb;
+
+/** The profile used when no `--style` is given. */
+export function defaultProfileFor(language: string): StyleProfile {
+    if (language === 'python') return STYLE_PROFILES.python;
+    if (language === 'java') return STYLE_PROFILES.java;
+    return DEFAULT_PROFILE;
+}
 
 /**
  * Get a style profile by name

@@ -1,76 +1,43 @@
 /**
- * Watch Mode
- * 
- * Watches files for changes and runs beautification automatically.
+ * Watch mode: re-run Prismify when supported files change.
  */
 
-import { watch, FSWatcher } from 'fs';
-import { resolve, extname } from 'path';
-import chalk from 'chalk';
-
-const SUPPORTED_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.py', '.java']);
+import { watch, type FSWatcher, statSync } from 'node:fs';
+import { resolve, join, dirname, basename } from 'node:path';
+import { detectLanguage } from '../languages/index.js';
+import { DEFAULT_IGNORES, globToRegex } from '../core/files.js';
 
 export interface WatchOptions {
-    /** Path to watch (file or directory) */
     path: string;
-
-    /** Callback to run on file change */
     onFileChange: (filePath: string) => Promise<void>;
-
-    /** Debounce delay in ms */
     debounceMs?: number;
-
-    /** Verbose output */
-    verbose?: boolean;
+    ignore?: string[];
 }
 
-/**
- * Start watching a file or directory
- */
 export function startWatcher(options: WatchOptions): { stop: () => void } {
-    const { path: watchPath, onFileChange, debounceMs = 300, verbose = false } = options;
-    const resolvedPath = resolve(watchPath);
-
-    // Debounce tracker
+    const { onFileChange, debounceMs = 300 } = options;
+    const root = resolve(options.path);
+    const isFile = statSync(root).isFile();
+    const watchRoot = isFile ? dirname(root) : root;
+    const matchers = [...DEFAULT_IGNORES, ...(options.ignore ?? [])].map(globToRegex);
     const pending = new Map<string, NodeJS.Timeout>();
+    let running = Promise.resolve();
 
-    if (verbose) {
-        console.log(chalk.gray(`Watching: ${resolvedPath}`));
-    }
+    const watcher: FSWatcher = watch(watchRoot, { recursive: !isFile }, (_event, filename) => {
+        if (!filename) return;
+        const full = join(watchRoot, filename.toString());
+        if (isFile && full !== root) return;
+        if (!detectLanguage(full)) return;
+        const parts = filename.toString().split(/[\\/]/);
+        if (matchers.some(re => parts.some(p => re.test(p)) || re.test(basename(full)))) return;
 
-    const watcher: FSWatcher = watch(
-        resolvedPath,
-        { recursive: true },
-        (eventType, filename) => {
-            if (!filename) return;
-
-            const ext = extname(filename);
-            if (!SUPPORTED_EXTENSIONS.has(ext)) return;
-
-            const fullPath = resolve(resolvedPath, filename);
-
-            // Debounce
-            if (pending.has(fullPath)) {
-                clearTimeout(pending.get(fullPath)!);
-            }
-
-            pending.set(fullPath, setTimeout(async () => {
-                pending.delete(fullPath);
-
-                if (verbose) {
-                    console.log(chalk.gray(`Change detected: ${filename}`));
-                }
-
-                try {
-                    await onFileChange(fullPath);
-                } catch (error: any) {
-                    console.error(chalk.red(`Error processing ${filename}: ${error.message}`));
-                }
-            }, debounceMs));
-        }
-    );
-
-    console.log(chalk.green(`✓ Watching for changes... (Ctrl+C to stop)`));
+        clearTimeout(pending.get(full));
+        pending.set(full, setTimeout(() => {
+            pending.delete(full);
+            // Run one file at a time so output doesn't interleave.
+            running = running.then(() => onFileChange(full)).catch(() => undefined);
+        }, debounceMs));
+    });
 
     return {
         stop: () => {

@@ -1,79 +1,74 @@
 /**
- * Language Plugins Index
- * 
- * Factory for creating language-specific plugins.
+ * Language plugin registry.
  */
 
+import { extname } from 'node:path';
 import type { LanguagePlugin, SupportedLanguage } from '../types/index.js';
 import { JavaScriptPlugin } from './javascript.js';
 import { PythonPlugin } from './python.js';
 import { JavaPlugin } from './java.js';
 
-/**
- * Map of language identifiers to plugins
- */
-const plugins: Map<SupportedLanguage, LanguagePlugin> = new Map();
+const EXTENSIONS: Record<string, SupportedLanguage> = {
+    '.js': 'javascript',
+    '.jsx': 'javascript',
+    '.mjs': 'javascript',
+    '.cjs': 'javascript',
+    '.ts': 'typescript',
+    '.tsx': 'typescript',
+    '.mts': 'typescript',
+    '.cts': 'typescript',
+    '.py': 'python',
+    '.pyw': 'python',
+    '.pyi': 'python',
+    '.java': 'java',
+};
 
-/**
- * Initialize plugins lazily
- */
-function ensurePlugins() {
-    if (plugins.size === 0) {
-        const js = new JavaScriptPlugin();
-        plugins.set('javascript', js);
-        plugins.set('typescript', js); // Same plugin handles both
-        plugins.set('python', new PythonPlugin());
-        plugins.set('java', new JavaPlugin());
-    }
-}
+const cache = new Map<string, LanguagePlugin>();
 
-/**
- * Get a plugin for a specific language
- */
-export function getPlugin(language: SupportedLanguage): LanguagePlugin {
-    ensurePlugins();
-    const plugin = plugins.get(language);
+/** Get the plugin for a language. `filePath` picks JSX/TSX parsing where relevant. */
+export function getPlugin(language: SupportedLanguage, filePath = ''): LanguagePlugin {
+    const ext = extname(filePath).toLowerCase();
+    const key = language === 'typescript' ? `ts:${ext === '.tsx'}` : language === 'javascript' ? 'js' : language;
+    let plugin = cache.get(key);
     if (!plugin) {
-        throw new Error(`No plugin available for language: ${language}`);
+        switch (language) {
+            case 'javascript':
+                plugin = new JavaScriptPlugin({ typescript: false, jsx: true });
+                break;
+            case 'typescript':
+                plugin = new JavaScriptPlugin({ typescript: true, jsx: ext === '.tsx' });
+                break;
+            case 'python':
+                plugin = new PythonPlugin();
+                break;
+            case 'java':
+                plugin = new JavaPlugin();
+                break;
+            default:
+                throw new Error(`No plugin for language: ${language}`);
+        }
+        cache.set(key, plugin);
     }
     return plugin;
 }
 
-/**
- * Auto-detect language from file extension
- */
+/** Detect the language from a file's extension. */
 export function detectLanguage(filePath: string): SupportedLanguage | null {
-    const ext = filePath.toLowerCase().split('.').pop();
-
-    switch (ext) {
-        case 'js':
-        case 'jsx':
-        case 'mjs':
-        case 'cjs':
-            return 'javascript';
-        case 'ts':
-        case 'tsx':
-            return 'typescript';
-        case 'py':
-        case 'pyw':
-            return 'python';
-        case 'java':
-            return 'java';
-        default:
-            return null;
-    }
+    return EXTENSIONS[extname(filePath).toLowerCase()] ?? null;
 }
 
-/**
- * Get all supported file extensions
- */
-export function getSupportedExtensions(): string[] {
-    ensurePlugins();
-    const extensions: string[] = [];
-    for (const plugin of plugins.values()) {
-        extensions.push(...plugin.extensions);
-    }
-    return [...new Set(extensions)];
+export function supportedExtensions(): string[] {
+    return Object.keys(EXTENSIONS);
+}
+
+/** Parse a user-supplied language name (`js`, `ts`, `py`, …). */
+export function parseLanguage(input: string): SupportedLanguage | null {
+    const v = input.toLowerCase();
+    if (['js', 'javascript', 'jsx', 'node'].includes(v)) return 'javascript';
+    if (['ts', 'typescript', 'tsx'].includes(v)) return 'typescript';
+    if (['py', 'python', 'python3'].includes(v)) return 'python';
+    if (['java'].includes(v)) return 'java';
+    return null;
 }
 
 export { JavaScriptPlugin } from './javascript.js';

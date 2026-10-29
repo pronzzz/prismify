@@ -1,48 +1,83 @@
 {
     "name": "prismify",
-    "version": "1.0.0",
-    "description": "AI-powered code beautification engine that goes beyond syntax formatting",
+    "version": "5.0.0",
+    "description": "Make code easier to read: scope-safe renames, formatting, doc comments and refactoring hints for JavaScript, TypeScript, Python and Java. Works offline, or with a local LLM via Ollama.",
     "type": "module",
     "main": "dist/index.js",
-    "bin": {
-        "prismify": "dist/index.js"
+    "types": "dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./package.json": "./package.json"
     },
+    "bin": {
+        "prismify": "dist/cli.js"
+    },
+    "files": [
+        "dist",
+        "!dist/**/*.map",
+        "README.md",
+        "LICENSE",
+        "CHANGELOG.md"
+    ],
     "scripts": {
-        "build": "tsc",
-        "dev": "tsx src/index.ts",
+        "build": "tsc -p tsconfig.build.json",
+        "dev": "tsx src/cli.ts",
         "test": "vitest run",
         "test:watch": "vitest",
-        "lint": "eslint src --ext .ts"
+        "typecheck": "tsc --noEmit",
+        "prepare": "npm run build",
+        "prepublishOnly": "npm run typecheck && npm test"
     },
     "keywords": [
         "code-beautifier",
-        "ai",
+        "formatter",
         "refactoring",
+        "rename",
         "clean-code",
+        "readability",
+        "ollama",
+        "llm",
+        "ai",
+        "prettier",
+        "python",
+        "typescript",
+        "java",
+        "cli",
         "developer-tools"
     ],
-    "author": "",
+    "author": "Pranav Dwivedi (https://github.com/pronzzz)",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/pronzzz/prismify.git"
+    },
+    "homepage": "https://github.com/pronzzz/prismify#readme",
+    "bugs": {
+        "url": "https://github.com/pronzzz/prismify/issues"
+    },
     "dependencies": {
-        "@babel/parser": "^7.23.0",
-        "@babel/traverse": "^7.23.0",
-        "@babel/generator": "^7.23.0",
-        "@babel/types": "^7.23.0",
-        "chalk": "^5.3.0",
-        "commander": "^11.1.0",
-        "diff": "^5.1.0",
-        "ollama": "^0.5.0",
-        "prettier": "^3.1.0"
+        "@babel/parser": "^7.29.11",
+        "@babel/traverse": "^7.29.10",
+        "@babel/types": "^7.29.11",
+        "chalk": "^5.6.2",
+        "commander": "^12.1.0",
+        "diff": "^7.0.0",
+        "ollama": "^0.5.18",
+        "prettier": "^3.9.10",
+        "prettier-plugin-java": "^2.11.0"
     },
     "devDependencies": {
-        "@types/babel__traverse": "^7.20.0",
-        "@types/diff": "^5.0.0",
-        "@types/node": "^20.10.0",
-        "tsx": "^4.6.0",
-        "typescript": "^5.3.0",
-        "vitest": "^1.0.0"
+        "@types/babel__traverse": "^7.28.0",
+        "@types/diff": "^7.0.2",
+        "@types/node": "^20.19.43",
+        "tsx": "^4.23.15",
+        "typescript": "~5.9",
+        "vitest": "^3.2.7"
     },
     "engines": {
-        "node": ">=18.0.0"
+        "node": ">=20"
     }
 }

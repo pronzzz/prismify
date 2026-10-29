@@ -1,5 +1,2 @@
-/**
- * Output Module Exports
- */
-
-export { generateDiff, formatChangeList, type DiffResult } from './diff.js';
+export { renderDiff, unifiedDiff, diffStats, type DiffStats } from './diff.js';
+export { fileReport, statusLine, summaryLine, type ReportOptions } from './report.js';

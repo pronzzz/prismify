@@ -24,3 +24,8 @@ npm-debug.log*
 
 # Test coverage
 coverage/
+
+# Packaging
+vscode-extension/out/
+*.vsix
+*.tgz

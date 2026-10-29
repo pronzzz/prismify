@@ -5,10 +5,9 @@
  */
 
 import type { StyleProfile, NamingConvention } from './profiles.js';
-import { DEFAULT_PROFILE } from './profiles.js';
 
 export interface DetectedStyle {
-    /** Detected or inferred profile */
+    /** Only the settings that were detected; merge these over a base profile. */
     profile: Partial<StyleProfile>;
 
     /** Confidence in detection (0-1) */
@@ -144,8 +143,8 @@ function detectIndentation(code: string): { style: 'spaces' | 'tabs'; size: 2 | 
  * Detect quote style
  */
 function detectQuotes(code: string): 'single' | 'double' {
-    const singleCount = (code.match(/'/g) || []).length;
-    const doubleCount = (code.match(/"/g) || []).length;
+    const singleCount = (code.match(/'[^'\n]*'/g) || []).length;
+    const doubleCount = (code.match(/"[^"\n]*"/g) || []).length;
     return singleCount > doubleCount ? 'single' : 'double';
 }
 
@@ -153,8 +152,12 @@ function detectQuotes(code: string): 'single' | 'double' {
  * Detect semicolon usage
  */
 function detectSemicolons(code: string): boolean {
-    const statements = code.split('\n').filter(l => l.trim() && !l.trim().startsWith('//'));
-    const withSemi = statements.filter(l => l.trimEnd().endsWith(';')).length;
+    // Only lines that end a statement: skip blank lines, comments, and lines that open or close blocks.
+    const statements = code
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l && !/^(\/\/|\/\*|\*)/.test(l) && !/[{}(\[,]$/.test(l) && !/^[}\])]/.test(l));
+    const withSemi = statements.filter(l => l.endsWith(';')).length;
     return withSemi > statements.length / 2;
 }
 
@@ -175,7 +178,7 @@ export function detectStyle(
     language: 'javascript' | 'typescript' | 'python' | 'java'
 ): DetectedStyle {
     const patterns: StylePattern[] = [];
-    const profile: Partial<StyleProfile> = { ...DEFAULT_PROFILE };
+    const profile: Partial<StyleProfile> = {};
 
     // Extract names
     const names = language === 'python'
@@ -204,8 +207,8 @@ export function detectStyle(
     profile.indentStyle = indent.style;
     profile.indentSize = indent.size;
 
-    // Detect quotes (JS/TS only)
-    if (language !== 'python') {
+    // Detect quotes and semicolons (JS/TS only; Java syntax fixes both).
+    if (language === 'javascript' || language === 'typescript') {
         const quotes = detectQuotes(code);
         patterns.push({
             name: 'quotes',

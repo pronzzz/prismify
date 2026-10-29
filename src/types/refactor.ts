@@ -1,118 +1,69 @@
 /**
- * Refactoring Types
- * 
- * Type definitions for Phase 2 semantic refactoring features.
+ * Types for refactoring analysis. Suggestions are reported, never auto-applied.
  */
 
-/**
- * Types of refactoring suggestions
- */
-export type RefactorType =
-    | 'simplify-conditional'
-    | 'extract-function'
-    | 'magic-constant'
-    | 'group-logic';
+export type RefactorType = 'simplify-conditional' | 'magic-constant';
 
-/**
- * A single refactoring suggestion
- */
 export interface RefactorSuggestion {
-    /** Type of refactoring */
     type: RefactorType;
-
-    /** Original code fragment */
-    original: string;
-
-    /** Suggested refactored code */
-    refactored: string;
-
-    /** Human-readable explanation */
+    /** Short title, e.g. "Extract 18 into MIN_AGE". */
+    title: string;
     explanation: string;
-
-    /** Confidence score 0-1 */
+    /** Code before (excerpt). */
+    original: string;
+    /** Suggested code. */
+    refactored: string;
+    /** 0–1. */
     confidence: number;
-
-    /** Line range affected [start, end] (1-indexed) */
+    /** 1-indexed inclusive line range. */
     lineRange: [number, number];
-
-    /** Whether user has accepted this suggestion */
-    accepted?: boolean;
 }
 
-/**
- * Options for refactoring analysis
- */
 export interface RefactorOptions {
-    /** Extract repeated logic into helper functions */
-    extractHelpers?: boolean;
-
-    /** Simplify nested conditionals with early returns */
     simplifyConditionals?: boolean;
-
-    /** Convert magic numbers to named constants */
     namedConstants?: boolean;
-
-    /** Group related logic with section comments */
-    groupLogic?: boolean;
-
-    /** Maximum nesting depth before suggesting simplification (default: 3) */
+    /** Nesting depth above which a conditional is reported. Default 3. */
     maxNestingDepth?: number;
-
-    /** Minimum confidence to include a suggestion (default: 0.6) */
-    confidenceThreshold?: number;
 }
 
-/**
- * Default refactoring options
- */
 export const DEFAULT_REFACTOR_OPTIONS: Required<RefactorOptions> = {
-    extractHelpers: true,
     simplifyConditionals: true,
     namedConstants: true,
-    groupLogic: false, // Disabled by default
     maxNestingDepth: 3,
-    confidenceThreshold: 0.6,
 };
 
-/**
- * Detected magic number
- */
+/** A numeric literal that probably deserves a name. */
 export interface MagicNumber {
-    /** The numeric value */
     value: number;
-
-    /** Original code representation */
-    original: string;
-
-    /** Line number (1-indexed) */
+    /** Source text of the literal. */
+    raw: string;
     line: number;
-
-    /** Column number (0-indexed) */
     column: number;
-
-    /** Surrounding context for AI naming */
-    context: string;
-
-    /** AI-suggested constant name */
-    suggestedName?: string;
+    /** Source line it appears on. */
+    lineText: string;
+    /** A name hint from the surrounding code (e.g. the compared property). */
+    hint?: string;
+    /** What the literal is used for. */
+    usage?: 'compare' | 'timer' | 'status' | 'arithmetic' | 'argument' | 'other';
+    /** Operator next to the literal, for arithmetic usage (`*`, `+=`, …). */
+    operator?: string;
 }
 
-/**
- * Nested conditional block
- */
+/** A chain of nested `if` statements. */
 export interface NestedConditional {
-    /** Nesting depth (1 = not nested) */
     depth: number;
-
-    /** Start line (1-indexed) */
     startLine: number;
-
-    /** End line (1-indexed) */
     endLine: number;
-
-    /** Original code */
-    code: string;
-
-    /** Simplified version using early returns */
-    simplified?: string;
+    /** Conditions from outermost to innermost (source text). */
+    conditions: string[];
+    /** Body of the innermost `if` (source text). */
+    body: string;
+    /** Each if contains only the next one and none has an else branch (so conditions can be combined). */
+    pure: boolean;
+    /** True when the chain can be rewritten as guard clauses without changing behaviour. */
+    guardable: boolean;
+    /** What follows the chain in its function: nothing, a single return, or other code. */
+    tail: 'empty' | 'return' | 'other';
+    /** The trailing return statement when `tail` is `return`. */
+    tailReturn?: string;
 }

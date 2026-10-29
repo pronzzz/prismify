@@ -7,6 +7,7 @@ export {
     type NamingConvention,
     STYLE_PROFILES,
     DEFAULT_PROFILE,
+    defaultProfileFor,
     getProfile,
     listProfiles
 } from './profiles.js';

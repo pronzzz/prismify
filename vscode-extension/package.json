@@ -1,9 +1,9 @@
 {
     "name": "prismify",
-    "displayName": "Prismify - AI Code Beautifier",
-    "description": "AI-powered code beautification that goes beyond syntax formatting",
-    "version": "1.0.0",
-    "publisher": "prismify",
+    "displayName": "Prismify",
+    "description": "Readable code in one command: safe renames, formatting, doc comments and refactoring hints for JS, TS, Python and Java.",
+    "version": "2.0.0",
+    "publisher": "pronzzz",
     "engines": {
         "vscode": "^1.80.0"
     },
@@ -20,76 +20,87 @@
         "rename",
         "clean code"
     ],
-    "activationEvents": [
-        "onLanguage:javascript",
-        "onLanguage:typescript",
-        "onLanguage:python",
-        "onLanguage:java"
-    ],
+    "activationEvents": [],
     "main": "./out/extension.js",
     "contributes": {
         "commands": [
             {
                 "command": "prismify.beautify",
-                "title": "Prismify: Beautify Current File"
+                "title": "Beautify File (rename + format)",
+                "category": "Prismify"
             },
             {
-                "command": "prismify.beautifyWithOptions",
-                "title": "Prismify: Beautify with Options..."
-            },
-            {
-                "command": "prismify.detectStyle",
-                "title": "Prismify: Detect Code Style"
+                "command": "prismify.format",
+                "title": "Format File (no renames)",
+                "category": "Prismify"
             },
             {
                 "command": "prismify.explain",
-                "title": "Prismify: Add Explanatory Comments"
+                "title": "Add Doc Comments",
+                "category": "Prismify"
+            },
+            {
+                "command": "prismify.analyze",
+                "title": "Show Refactoring Suggestions",
+                "category": "Prismify"
             }
         ],
         "configuration": {
             "title": "Prismify",
             "properties": {
-                "prismify.enabled": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable Prismify"
+                "prismify.path": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to the prismify CLI. Empty: use the workspace's node_modules/.bin/prismify, then PATH."
                 },
                 "prismify.styleProfile": {
                     "type": "string",
-                    "default": "airbnb",
+                    "default": "",
                     "enum": [
+                        "",
                         "google",
                         "airbnb",
                         "minimal",
                         "python",
+                        "java",
                         "competitive"
                     ],
-                    "description": "Default style profile"
+                    "description": "Style profile. Empty: the language default (or your .prismifyrc.json)."
                 },
-                "prismify.formatOnSave": {
+                "prismify.detectStyle": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Run Prismify on save"
+                    "description": "Match each file's existing indentation, quotes and semicolons."
                 },
-                "prismify.aiProvider": {
+                "prismify.provider": {
                     "type": "string",
                     "default": "auto",
                     "enum": [
+                        "auto",
                         "ollama",
-                        "mock",
-                        "auto"
+                        "heuristic"
                     ],
-                    "description": "AI provider for naming suggestions"
+                    "description": "Naming provider. auto uses Ollama when it is running, otherwise offline heuristics."
+                },
+                "prismify.model": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Ollama model. Empty: the best installed code model."
                 },
                 "prismify.explainLevel": {
                     "type": "string",
                     "default": "production",
                     "enum": [
-                        "beginner",
+                        "production",
                         "pr-review",
-                        "production"
+                        "beginner"
                     ],
-                    "description": "Explanation detail level"
+                    "description": "Detail level for doc comments."
+                },
+                "prismify.formatOnSave": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Format (without renaming) when you save."
                 }
             }
         },
@@ -97,19 +108,34 @@
             "editor/context": [
                 {
                     "command": "prismify.beautify",
-                    "when": "resourceLangId =~ /javascript|typescript|python|java/",
-                    "group": "1_modification"
+                    "when": "editorLangId =~ /^(javascript|javascriptreact|typescript|typescriptreact|python|java)$/",
+                    "group": "1_modification@90"
+                },
+                {
+                    "command": "prismify.analyze",
+                    "when": "editorLangId =~ /^(javascript|javascriptreact|typescript|typescriptreact|python|java)$/",
+                    "group": "1_modification@91"
+                }
+            ],
+            "commandPalette": [
+                {
+                    "command": "prismify.beautify",
+                    "when": "editorLangId =~ /^(javascript|javascriptreact|typescript|typescriptreact|python|java)$/"
+                },
+                {
+                    "command": "prismify.format",
+                    "when": "editorLangId =~ /^(javascript|javascriptreact|typescript|typescriptreact|python|java)$/"
+                },
+                {
+                    "command": "prismify.explain",
+                    "when": "editorLangId =~ /^(javascript|javascriptreact|typescript|typescriptreact|python|java)$/"
+                },
+                {
+                    "command": "prismify.analyze",
+                    "when": "editorLangId =~ /^(javascript|javascriptreact|typescript|typescriptreact|python|java)$/"
                 }
             ]
-        },
-        "keybindings": [
-            {
-                "command": "prismify.beautify",
-                "key": "ctrl+shift+p",
-                "mac": "cmd+shift+p",
-                "when": "editorTextFocus"
-            }
-        ]
+        }
     },
     "scripts": {
         "vscode:prepublish": "npm run compile",
@@ -118,10 +144,13 @@
     },
     "devDependencies": {
         "@types/vscode": "^1.80.0",
-        "@types/node": "^18.0.0",
-        "typescript": "^5.0.0"
+        "@types/node": "^20.0.0",
+        "typescript": "^5.6.0"
     },
-    "dependencies": {
-        "prismify": "^1.0.0"
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/pronzzz/prismify.git",
+        "directory": "vscode-extension"
     }
 }

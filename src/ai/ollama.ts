@@ -1,330 +1,276 @@
 /**
- * Ollama AI Provider
- * 
- * Implements AI-powered naming suggestions with multiple anti-hallucination constraints:
- * 1. Low temperature (0.1) for deterministic outputs
- * 2. Constrained prompts with explicit rules
- * 3. Consistency checking (query multiple times, require agreement)
- * 4. Output validation (must be valid identifier)
- * 5. Confidence scoring based on context analysis
+ * Ollama provider: naming and documentation from a local LLM.
+ *
+ * Guardrails against bad suggestions:
+ *  - JSON-only responses, parsed defensively
+ *  - all candidates of a file batched into one prompt with their code
+ *  - the prompt is asked `checks` times; a name must win a majority to be used
+ *  - every name is validated (syntax, keywords, length) before use, and the
+ *    language plugin re-checks scope safety before applying it
  */
 
 import { Ollama } from 'ollama';
 import type {
     AIProvider,
+    ExplainLevel,
+    FunctionInfo,
     Identifier,
     NamingSuggestion,
-    OllamaConfig
+    ProviderContext,
 } from '../types/index.js';
-import { DEFAULT_OLLAMA_CONFIG } from '../types/index.js';
+import { conventionalName, isValidIdentifier } from '../core/naming.js';
+
+export interface OllamaOptions {
+    host?: string;
+    model?: string;
+    /** How many times to ask for names; a majority must agree. Default 3. */
+    checks?: number;
+    /** Milliseconds to wait when connecting. Default 2500. */
+    connectTimeoutMs?: number;
+}
+
+export const DEFAULT_OLLAMA_HOST = 'http://127.0.0.1:11434';
+const PREFERRED_MODELS = /coder|code|deepseek|qwen|starcoder|granite|codestral|codegemma/i;
+const CHUNK = 12;
 
 export class OllamaProvider implements AIProvider {
     name = 'ollama';
-    private client: Ollama;
-    private config: OllamaConfig;
+    label: string;
+    private warnings: string[] = [];
 
-    constructor(config: Partial<OllamaConfig> = {}) {
-        this.config = { ...DEFAULT_OLLAMA_CONFIG, ...config };
-        this.client = new Ollama({ host: 'http://127.0.0.1:11434' });
+    private constructor(
+        private client: Ollama,
+        readonly host: string,
+        readonly model: string,
+        private checks: number
+    ) {
+        this.label = `ollama (${model})`;
     }
 
-    async isAvailable(): Promise<boolean> {
+    /** Connect and pick a model. Throws an Error with a helpful message on failure. */
+    static async connect(opts: OllamaOptions = {}): Promise<OllamaProvider> {
+        const host = opts.host || process.env.OLLAMA_HOST || DEFAULT_OLLAMA_HOST;
+        const normalizedHost = /^https?:\/\//.test(host) ? host : `http://${host}`;
+        const client = new Ollama({ host: normalizedHost });
+        let models: string[];
         try {
-            await this.client.list();
-            return true;
+            const list = await withTimeout(client.list(), opts.connectTimeoutMs ?? 2500);
+            models = list.models.map(m => m.name);
         } catch {
-            return false;
+            throw new Error(`Ollama is not reachable at ${normalizedHost}. Start it with \`ollama serve\`.`);
         }
-    }
-
-    /**
-     * Suggest a better name for an identifier with anti-hallucination measures
-     */
-    async suggestName(identifier: Identifier): Promise<NamingSuggestion> {
-        // Skip if name already looks good
-        if (this.isAlreadyDescriptive(identifier.name)) {
-            return {
-                original: identifier.name,
-                suggested: identifier.name,
-                reason: 'Name is already descriptive',
-                confidence: 1.0,
-                shouldApply: false,
-            };
-        }
-
-        // Build constrained prompt
-        const prompt = this.buildNamingPrompt(identifier);
-
-        // Query multiple times for consistency
-        const suggestions: string[] = [];
-        for (let i = 0; i < this.config.consistencyChecks; i++) {
-            const suggestion = await this.querySingleName(prompt);
-            if (suggestion && this.isValidIdentifier(suggestion, identifier.type)) {
-                suggestions.push(suggestion.toLowerCase());
-            }
-        }
-
-        // Check consistency - find most common suggestion
-        const { bestName, agreementRatio } = this.findConsensus(suggestions);
-
-        if (!bestName || agreementRatio < this.config.consistencyThreshold) {
-            return {
-                original: identifier.name,
-                suggested: identifier.name,
-                reason: 'AI suggestions were inconsistent, keeping original',
-                confidence: agreementRatio,
-                shouldApply: false,
-            };
-        }
-
-        // Calculate final confidence
-        const confidence = this.calculateConfidence(identifier, bestName, agreementRatio);
-
-        // Format the name properly based on type
-        const formattedName = this.formatName(bestName, identifier.type);
-
-        return {
-            original: identifier.name,
-            suggested: formattedName,
-            reason: await this.generateReason(identifier, formattedName),
-            confidence,
-            shouldApply: confidence >= this.config.confidenceThreshold,
-        };
-    }
-
-    /**
-     * Explain a code change
-     */
-    async explainChange(before: string, after: string): Promise<string> {
-        const prompt = `You are a code reviewer. Explain in ONE short sentence why this change improves readability.
-
-BEFORE:
-${before.slice(0, 200)}
-
-AFTER:
-${after.slice(0, 200)}
-
-Explanation (one sentence only):`;
-
-        try {
-            const response = await this.client.generate({
-                model: this.config.model,
-                prompt,
-                options: {
-                    temperature: 0.2,
-                    top_p: 0.9,
-                    num_predict: 100,
-                },
-                stream: false,
-            });
-
-            return response.response.trim().split('\n')[0]; // Only first line
-        } catch {
-            return 'Improved code readability';
-        }
-    }
-
-    /**
-     * Build a highly constrained prompt to minimize hallucination
-     */
-    private buildNamingPrompt(identifier: Identifier): string {
-        const typeLabel = identifier.type === 'function' ? 'function' :
-            identifier.type === 'class' ? 'class' : 'variable';
-
-        return `You are a code naming expert. Suggest ONE better name for a ${typeLabel}.
-
-RULES:
-1. Reply with ONLY the new name, nothing else
-2. Use camelCase for variables/functions, PascalCase for classes
-3. Name must be 2-30 characters
-4. Be descriptive but concise
-5. No special characters, only letters and numbers
-6. If the current name is already good, reply with the same name
-
-Current name: ${identifier.name}
-Context:
-${identifier.context.slice(0, 300)}
-
-Better name:`;
-    }
-
-    /**
-     * Query Ollama for a single name suggestion
-     */
-    private async querySingleName(prompt: string): Promise<string | null> {
-        try {
-            const response = await this.client.generate({
-                model: this.config.model,
-                prompt,
-                options: {
-                    temperature: this.config.temperature,
-                    top_p: this.config.topP,
-                    top_k: this.config.topK,
-                    num_predict: this.config.maxTokens,
-                },
-                stream: false,
-            });
-
-            // Extract just the name from response
-            const rawResponse = response.response.trim();
-            const name = rawResponse.split(/[\s\n:`'".,;(){}[\]]+/)[0];
-
-            return name || null;
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * Check if a name is already descriptive enough
-     */
-    private isAlreadyDescriptive(name: string): boolean {
-        // Skip single-letter names except common loop vars
-        if (name.length === 1 && !['i', 'j', 'k', 'x', 'y', 'z'].includes(name)) {
-            return false;
-        }
-
-        // Skip very short cryptic names
-        if (name.length <= 2) {
-            return false;
-        }
-
-        // Skip names that are all consonants or look like abbreviations
-        if (/^[bcdfghjklmnpqrstvwxz]+$/i.test(name) && name.length <= 4) {
-            return false;
-        }
-
-        // Allow loop variables
-        if (['i', 'j', 'k', 'idx', 'index', 'key', 'val', 'value'].includes(name.toLowerCase())) {
-            return true;
-        }
-
-        // Name looks reasonable if it's 4+ chars with vowels
-        return name.length >= 4;
-    }
-
-    /**
-     * Check if a suggested name is a valid identifier
-     */
-    private isValidIdentifier(name: string, type: string): boolean {
-        // Must be reasonable length
-        if (name.length < 2 || name.length > 30) return false;
-
-        // Must start with letter or underscore
-        if (!/^[a-zA-Z_]/.test(name)) return false;
-
-        // Must only contain valid chars
-        if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) return false;
-
-        // Classes should start with uppercase
-        if (type === 'class' && !/^[A-Z]/.test(name)) return false;
-
-        // Variables/functions should start with lowercase
-        if ((type === 'variable' || type === 'function') && /^[A-Z]/.test(name)) return false;
-
-        // Reject common garbage outputs
-        const blacklist = ['the', 'a', 'an', 'this', 'that', 'name', 'better', 'new', 'old'];
-        if (blacklist.includes(name.toLowerCase())) return false;
-
-        return true;
-    }
-
-    /**
-     * Find the most agreed-upon suggestion
-     */
-    private findConsensus(suggestions: string[]): { bestName: string | null; agreementRatio: number } {
-        if (suggestions.length === 0) {
-            return { bestName: null, agreementRatio: 0 };
-        }
-
-        // Count occurrences
-        const counts = new Map<string, number>();
-        for (const s of suggestions) {
-            counts.set(s, (counts.get(s) || 0) + 1);
-        }
-
-        // Find max
-        let bestName = '';
-        let maxCount = 0;
-        for (const [name, count] of counts) {
-            if (count > maxCount) {
-                maxCount = count;
-                bestName = name;
-            }
-        }
-
-        return {
-            bestName,
-            agreementRatio: maxCount / this.config.consistencyChecks,
-        };
-    }
-
-    /**
-     * Calculate confidence based on multiple factors
-     */
-    private calculateConfidence(
-        identifier: Identifier,
-        suggestion: string,
-        agreementRatio: number
-    ): number {
-        let confidence = agreementRatio;
-
-        // Boost if original was very short/cryptic
-        if (identifier.name.length <= 2) {
-            confidence += 0.1;
-        }
-
-        // Reduce if suggestion is too similar to original
-        if (suggestion.toLowerCase().includes(identifier.name.toLowerCase())) {
-            confidence -= 0.1;
-        }
-
-        // Reduce if suggestion is too long
-        if (suggestion.length > 25) {
-            confidence -= 0.2;
-        }
-
-        // Boost if suggestion is in reasonable length range
-        if (suggestion.length >= 5 && suggestion.length <= 20) {
-            confidence += 0.05;
-        }
-
-        return Math.max(0, Math.min(1, confidence));
-    }
-
-    /**
-     * Format name according to type conventions
-     */
-    private formatName(name: string, type: string): string {
-        // Split into words
-        const words = name
-            .replace(/([a-z])([A-Z])/g, '$1 $2')
-            .replace(/[_-]/g, ' ')
-            .toLowerCase()
-            .split(' ')
-            .filter(w => w.length > 0);
-
-        if (type === 'class') {
-            // PascalCase
-            return words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('');
+        const wanted = opts.model || process.env.OLLAMA_MODEL || process.env.PRISMIFY_MODEL;
+        let model: string;
+        if (wanted) {
+            const match = models.find(m => m === wanted || m === `${wanted}:latest` || m.split(':')[0] === wanted);
+            if (!match) throw new Error(`Model "${wanted}" is not installed in Ollama. Run \`ollama pull ${wanted}\`.`);
+            model = match;
         } else {
-            // camelCase
-            return words
-                .map((w, i) => i === 0 ? w : w.charAt(0).toUpperCase() + w.slice(1))
-                .join('');
+            if (models.length === 0) throw new Error('Ollama has no models installed. Run `ollama pull qwen2.5-coder:7b`.');
+            model = models.find(m => PREFERRED_MODELS.test(m)) ?? models[0];
         }
+        return new OllamaProvider(client, normalizedHost, model, Math.max(1, opts.checks ?? 3));
     }
 
-    /**
-     * Generate a simple reason for the rename
-     */
-    private async generateReason(identifier: Identifier, newName: string): Promise<string> {
-        if (identifier.name.length <= 2) {
-            return `Expanded cryptic name '${identifier.name}' to descriptive '${newName}'`;
-        }
-        if (identifier.name.length < newName.length) {
-            return `Made name more descriptive: '${identifier.name}' → '${newName}'`;
-        }
-        return `Improved clarity: '${identifier.name}' → '${newName}'`;
+    /** Messages about failed requests since the last call. */
+    drainWarnings(): string[] {
+        const w = this.warnings;
+        this.warnings = [];
+        return w;
     }
+
+    async suggestNames(candidates: Identifier[], ctx: ProviderContext): Promise<NamingSuggestion[]> {
+        const out: NamingSuggestion[] = [];
+        for (let i = 0; i < candidates.length; i += CHUNK) {
+            const chunk = candidates.slice(i, i + CHUNK);
+            const prompt = buildNamingPrompt(chunk, ctx);
+            const runs: Array<Map<string, { name: string; confidence: number; reason: string }>> = [];
+            for (let r = 0; r < this.checks; r++) {
+                try {
+                    const json = await this.generateJson(prompt, this.checks > 1 ? 0.3 : 0, 600);
+                    runs.push(parseRenames(json));
+                } catch (error: any) {
+                    this.warnings.push(`Ollama naming request failed: ${error.message ?? error}`);
+                    break;
+                }
+            }
+            if (runs.length === 0) continue;
+
+            for (const c of chunk) {
+                const votes = new Map<string, { count: number; conf: number; reason: string }>();
+                for (const run of runs) {
+                    const s = run.get(c.id);
+                    if (!s) continue;
+                    const name = conventionalName(s.name, c.type, ctx.language);
+                    if (!isValidIdentifier(name, ctx.language) || name === c.name) continue;
+                    const v = votes.get(name) ?? { count: 0, conf: 0, reason: s.reason };
+                    v.count++;
+                    v.conf += clamp(s.confidence, 0, 1);
+                    votes.set(name, v);
+                }
+                let best: [string, { count: number; conf: number; reason: string }] | undefined;
+                for (const entry of votes) if (!best || entry[1].count > best[1].count) best = entry;
+                if (!best) continue;
+                const agreement = best[1].count / this.checks;
+                if (agreement < 0.6) continue;
+                const modelConfidence = best[1].conf / best[1].count;
+                out.push({
+                    id: c.id,
+                    original: c.name,
+                    suggested: best[0],
+                    reason: best[1].reason || 'suggested by the model',
+                    confidence: round2(agreement * modelConfidence),
+                    source: 'ai',
+                });
+            }
+        }
+        return out;
+    }
+
+    async summarizeFunctions(fns: FunctionInfo[], level: ExplainLevel, ctx: ProviderContext): Promise<Map<string, string>> {
+        const out = new Map<string, string>();
+        for (let i = 0; i < fns.length; i += 6) {
+            const chunk = fns.slice(i, i + 6);
+            try {
+                const json = await this.generateJson(buildDocPrompt(chunk, level, ctx), 0.2, 900);
+                const docs = Array.isArray(json?.docs) ? json.docs : [];
+                for (const d of docs) {
+                    if (typeof d?.id !== 'string' || typeof d?.summary !== 'string') continue;
+                    if (!chunk.some(f => f.id === d.id)) continue;
+                    const summary = cleanSentence(d.summary);
+                    if (!summary) continue;
+                    const notes: string[] = Array.isArray(d.notes) ? d.notes.filter((n: unknown) => typeof n === 'string').map(cleanSentence).filter(Boolean) : [];
+                    const lines = level === 'production' ? [summary] : [summary, ...notes.slice(0, level === 'beginner' ? 3 : 2)];
+                    out.set(d.id, lines.join('\n'));
+                }
+            } catch (error: any) {
+                this.warnings.push(`Ollama documentation request failed: ${error.message ?? error}`);
+            }
+        }
+        return out;
+    }
+
+    private async generateJson(prompt: string, temperature: number, maxTokens: number): Promise<any> {
+        const res = await this.client.generate({
+            model: this.model,
+            prompt,
+            format: 'json',
+            stream: false,
+            options: { temperature, top_p: 0.9, num_predict: maxTokens },
+        });
+        return parseJsonLoose(res.response);
+    }
+}
+
+// ── Prompts ──────────────────────────────────────────────────────────────
+
+function buildNamingPrompt(cands: Identifier[], ctx: ProviderContext): string {
+    const convention = ctx.language === 'python' ? 'snake_case' : 'camelCase';
+    const snippets = new Map<string, string>();
+    for (const c of cands) if (!snippets.has(c.context)) snippets.set(c.context, `S${snippets.size + 1}`);
+
+    const items = cands.map(c => {
+        const h = c.hints ?? {};
+        const evidence = [
+            h.initFrom && `assigned from \`${h.initFrom}\``,
+            h.iterates && `iterates over \`${h.iterates}\``,
+            h.role && `looks like a ${h.role}`,
+            h.usedProperties?.length && `properties used: ${h.usedProperties.join(', ')}`,
+        ].filter(Boolean).join('; ');
+        return `- id: ${c.id} | current: ${c.name} | kind: ${c.type} | snippet: ${snippets.get(c.context)}${evidence ? ` | evidence: ${evidence}` : ''}`;
+    });
+
+    const code = [...snippets].map(([text, label]) => `### ${label}\n\`\`\`${ctx.language}\n${text}\n\`\`\``).join('\n\n');
+
+    return `You rename cryptic local identifiers in ${ctx.language} code to clear, conventional names.
+
+Rules:
+- Reply with JSON only, in this shape: {"renames":[{"id":"<id>","name":"<new name>","confidence":0.0,"reason":"<under 12 words>"}]}
+- Include every id listed below exactly once.
+- Use ${convention} for variables, parameters and functions; PascalCase for classes.
+- 2 to 30 characters, letters, digits and underscores only, never a language keyword or builtin.
+- Base each name only on how the value is used in the snippet. Do not invent meaning.
+- If the current name is already clear, or you are not sure, return the current name with confidence below 0.5.
+- Do not reuse a name that already appears in the same snippet.
+
+Identifiers:
+${items.join('\n')}
+
+Code:
+${code}
+`;
+}
+
+function buildDocPrompt(fns: FunctionInfo[], level: ExplainLevel, ctx: ProviderContext): string {
+    const style: Record<ExplainLevel, string> = {
+        production: '"summary": one sentence (max 18 words) saying what the function does. "notes": [].',
+        'pr-review': '"summary": one sentence (max 18 words). "notes": up to 2 short sentences about side effects, edge cases or risks a reviewer should know. Empty if none.',
+        beginner: '"summary": one plain-English sentence a beginner would understand. "notes": up to 3 short sentences explaining how it works.',
+    };
+    const blocks = fns.map(f => `### id: ${f.id}\n\`\`\`${ctx.language}\n${f.body}\n\`\`\``).join('\n\n');
+    return `Write documentation comments for these ${ctx.language} functions.
+
+Reply with JSON only: {"docs":[{"id":"<id>","summary":"...","notes":["..."]}]}
+${style[level]}
+Describe behaviour that is visible in the code. Do not guess about callers. No markdown, no code fences, do not repeat the function name as the first word.
+
+${blocks}
+`;
+}
+
+// ── Parsing ──────────────────────────────────────────────────────────────
+
+export function parseJsonLoose(text: string): any {
+    try {
+        return JSON.parse(text);
+    } catch {
+        const start = text.indexOf('{');
+        const end = text.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            try {
+                return JSON.parse(text.slice(start, end + 1));
+            } catch {
+                /* fall through */
+            }
+        }
+        throw new Error('model returned invalid JSON');
+    }
+}
+
+function parseRenames(json: any): Map<string, { name: string; confidence: number; reason: string }> {
+    const out = new Map<string, { name: string; confidence: number; reason: string }>();
+    const list = Array.isArray(json?.renames) ? json.renames : Array.isArray(json) ? json : [];
+    for (const r of list) {
+        if (typeof r?.id !== 'string' || typeof r?.name !== 'string') continue;
+        const conf = typeof r.confidence === 'number' ? r.confidence : Number(r.confidence) || 0.5;
+        out.set(r.id, { name: r.name.trim(), confidence: conf, reason: typeof r.reason === 'string' ? r.reason.trim() : '' });
+    }
+    return out;
+}
+
+function cleanSentence(s: string): string {
+    const t = s.replace(/[`*]{3,}/g, '').replace(/\s+/g, ' ').trim();
+    if (!t) return '';
+    return /[.!?]$/.test(t) ? t : `${t}.`;
+}
+
+function clamp(n: number, lo: number, hi: number) {
+    return Math.min(hi, Math.max(lo, Number.isFinite(n) ? n : lo));
+}
+
+function round2(n: number) {
+    return Math.round(n * 100) / 100;
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('timeout')), ms);
+        p.then(v => {
+            clearTimeout(timer);
+            resolve(v);
+        }, e => {
+            clearTimeout(timer);
+            reject(e);
+        });
+    });
 }

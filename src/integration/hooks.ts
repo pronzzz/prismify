@@ -1,126 +1,81 @@
 /**
- * Pre-commit Hook Integration
- * 
- * Installs a git pre-commit hook that runs Prismify on staged files.
+ * Git pre-commit hook.
+ *
+ * `check` mode (default) blocks the commit when staged files need changes.
+ * `write` mode fixes staged files and re-stages them.
+ * Both default to formatting only (`--no-rename`); pass other flags with `args`.
  */
 
-import { existsSync, mkdirSync, writeFileSync, chmodSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { join, resolve } from 'node:path';
 
-/**
- * Pre-commit hook script content
- */
-const HOOK_SCRIPT = `#!/bin/sh
-# Prismify pre-commit hook
-# Auto-beautifies staged files before commit
+const MARKER = '# prismify-hook';
 
-echo "🔮 Running Prismify on staged files..."
+export type HookMode = 'check' | 'write';
 
-# Get staged files for supported languages
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\\.(js|jsx|ts|tsx|py|java)$')
+export function hookScript(mode: HookMode, args: string): string {
+    const action = mode === 'write'
+        ? `$PRISMIFY --write ${args} $FILES || exit 1
+git add $FILES`
+        : `if ! $PRISMIFY --check ${args} $FILES; then
+  echo ""
+  echo "Prismify: some staged files need changes. Run: prismify --write ${args} <files>"
+  exit 1
+fi`;
+    return `#!/bin/sh
+${MARKER} (mode: ${mode})
+# Runs Prismify on staged JavaScript, TypeScript, Python and Java files.
 
-if [ -z "$STAGED_FILES" ]; then
-  echo "No supported files staged"
-  exit 0
+FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\\.(js|jsx|mjs|cjs|ts|tsx|mts|cts|py|pyi|java)$')
+[ -z "$FILES" ] && exit 0
+
+if command -v prismify >/dev/null 2>&1; then
+  PRISMIFY=prismify
+else
+  PRISMIFY="npx --no-install prismify"
 fi
 
-# Run prismify on each file
-for FILE in $STAGED_FILES; do
-  if [ -f "$FILE" ]; then
-    echo "  Beautifying: $FILE"
-    npx prismify "$FILE" --no-preview 2>/dev/null
-    if [ $? -ne 0 ]; then
-      echo "  ⚠ Warning: Failed to beautify $FILE"
-    else
-      git add "$FILE"
-    fi
-  fi
-done
-
-echo "✓ Prismify complete"
-exit 0
+${action}
 `;
-
-/**
- * Install the pre-commit hook
- */
-export function installPreCommitHook(repoPath: string = '.'): { success: boolean; message: string } {
-    const gitDir = join(repoPath, '.git');
-    const hooksDir = join(gitDir, 'hooks');
-    const hookPath = join(hooksDir, 'pre-commit');
-
-    // Check if .git exists
-    if (!existsSync(gitDir)) {
-        return {
-            success: false,
-            message: 'Not a git repository. Run "git init" first.',
-        };
-    }
-
-    // Create hooks directory if needed
-    if (!existsSync(hooksDir)) {
-        mkdirSync(hooksDir, { recursive: true });
-    }
-
-    // Check for existing hook
-    if (existsSync(hookPath)) {
-        const existing = readFileSync(hookPath, 'utf-8');
-        if (existing.includes('Prismify')) {
-            return {
-                success: true,
-                message: 'Prismify hook already installed.',
-            };
-        }
-        // Backup existing hook
-        writeFileSync(`${hookPath}.backup`, existing);
-    }
-
-    // Write hook
-    writeFileSync(hookPath, HOOK_SCRIPT);
-    chmodSync(hookPath, '755');
-
-    return {
-        success: true,
-        message: `Pre-commit hook installed at ${hookPath}`,
-    };
 }
 
-/**
- * Uninstall the pre-commit hook
- */
-export function uninstallPreCommitHook(repoPath: string = '.'): { success: boolean; message: string } {
-    const hookPath = join(repoPath, '.git', 'hooks', 'pre-commit');
-    const backupPath = `${hookPath}.backup`;
+function hooksDir(repoPath: string): string | null {
+    const r = spawnSync('git', ['rev-parse', '--git-path', 'hooks'], { cwd: repoPath, encoding: 'utf8' });
+    if (r.status !== 0) return null;
+    return resolve(repoPath, r.stdout.trim());
+}
 
-    if (!existsSync(hookPath)) {
-        return {
-            success: true,
-            message: 'No pre-commit hook to remove.',
-        };
+export function installPreCommitHook(repoPath = '.', mode: HookMode = 'check', args = '--no-rename'): { success: boolean; message: string } {
+    const dir = hooksDir(repoPath);
+    if (!dir) return { success: false, message: 'Not a git repository.' };
+    mkdirSync(dir, { recursive: true });
+    const hookPath = join(dir, 'pre-commit');
+    if (existsSync(hookPath)) {
+        const existing = readFileSync(hookPath, 'utf8');
+        if (!existing.includes(MARKER)) {
+            writeFileSync(`${hookPath}.prismify-backup`, existing);
+        }
     }
+    writeFileSync(hookPath, hookScript(mode, args));
+    chmodSync(hookPath, 0o755);
+    return { success: true, message: `Installed pre-commit hook (${mode} mode) at ${hookPath}` };
+}
 
-    const content = readFileSync(hookPath, 'utf-8');
-    if (!content.includes('Prismify')) {
-        return {
-            success: false,
-            message: 'Pre-commit hook is not a Prismify hook.',
-        };
+export function uninstallPreCommitHook(repoPath = '.'): { success: boolean; message: string } {
+    const dir = hooksDir(repoPath);
+    if (!dir) return { success: false, message: 'Not a git repository.' };
+    const hookPath = join(dir, 'pre-commit');
+    const backup = `${hookPath}.prismify-backup`;
+    if (!existsSync(hookPath)) return { success: true, message: 'No pre-commit hook installed.' };
+    if (!readFileSync(hookPath, 'utf8').includes(MARKER)) {
+        return { success: false, message: 'The existing pre-commit hook was not installed by Prismify; left it alone.' };
     }
-
-    // Restore backup if exists
-    if (existsSync(backupPath)) {
-        const backup = readFileSync(backupPath, 'utf-8');
-        writeFileSync(hookPath, backup);
-        return {
-            success: true,
-            message: 'Prismify hook removed, original hook restored.',
-        };
+    if (existsSync(backup)) {
+        writeFileSync(hookPath, readFileSync(backup, 'utf8'));
+        unlinkSync(backup);
+        return { success: true, message: 'Removed the Prismify hook and restored your previous hook.' };
     }
-
-    // Just remove the file
-    require('fs').unlinkSync(hookPath);
-    return {
-        success: true,
-        message: 'Prismify hook removed.',
-    };
+    unlinkSync(hookPath);
+    return { success: true, message: 'Removed the Prismify pre-commit hook.' };
 }
