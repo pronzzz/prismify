@@ -46,22 +46,25 @@ It runs locally. Names come from offline rules or from a local model through [Ol
 
 ## Install
 
-Requires **Node.js 20 or newer**.
+Requires **Node.js 20 or newer**. Install the prebuilt package from the latest GitHub release:
 
 ```bash
-npm install -g github:pronzzz/prismify
+npm install -g https://github.com/pronzzz/prismify/releases/latest/download/prismify.tgz
 ```
 
-Or install a specific release from its tarball:
+To pin a version, use its tarball instead (for example `…/releases/download/v5.0.0/prismify-5.0.0.tgz`). The same URL works as a project dev dependency:
 
 ```bash
-npm install -g https://github.com/pronzzz/prismify/releases/download/v5.0.0/prismify-5.0.0.tgz
+npm install --save-dev https://github.com/pronzzz/prismify/releases/download/v5.0.0/prismify-5.0.0.tgz
 ```
 
-Or add it to a project as a dev dependency:
+Or build from source:
 
 ```bash
-npm install --save-dev github:pronzzz/prismify
+git clone https://github.com/pronzzz/prismify.git
+cd prismify
+npm install        # installs dependencies and builds dist/
+npm link           # puts `prismify` on your PATH
 ```
 
 Then check your setup:
@@ -87,10 +90,9 @@ prismify . --check --no-rename    # CI: exit 1 if any file needs formatting
 cat a.ts | prismify - -l ts       # read stdin, write the result to stdout
 ```
 
-The repository ships with example files to try:
+The repository ships with example files to try (from a clone):
 
 ```bash
-git clone https://github.com/pronzzz/prismify.git && cd prismify
 prismify examples/cart.js
 prismify examples/refactor.js --refactor
 prismify examples/messy.py --explain
@@ -248,7 +250,7 @@ Prismify looks for `.prismifyrc.json`, `.prismifyrc`, `prismify.config.json` or 
 - uses: actions/setup-node@v4
   with:
     node-version: 22
-- run: npm install -g github:pronzzz/prismify
+- run: npm install -g https://github.com/pronzzz/prismify/releases/latest/download/prismify.tgz
 - run: prismify . --check --no-rename
 ```
 

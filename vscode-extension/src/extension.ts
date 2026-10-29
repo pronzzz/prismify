@@ -90,7 +90,7 @@ function runCli(document: vscode.TextDocument, extra: string[]): Promise<CliResu
         child.stderr.on('data', d => (stderr += d));
         child.on('error', (error: NodeJS.ErrnoException) => {
             reject(new Error(error.code === 'ENOENT'
-                ? `Could not find the Prismify CLI ("${command}"). Install it with \`npm install -g github:pronzzz/prismify\` or set "prismify.path".`
+                ? `Could not find the Prismify CLI ("${command}"). Install it with \`npm install -g https://github.com/pronzzz/prismify/releases/latest/download/prismify.tgz\` or set "prismify.path".`
                 : error.message));
         });
         child.on('close', () => {

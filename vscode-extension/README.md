@@ -4,7 +4,7 @@ Runs the [Prismify](https://github.com/pronzzz/prismify) CLI on the current file
 
 ## Setup
 
-1. Install the CLI: `npm install -g github:pronzzz/prismify` (or add it to your project's devDependencies).
+1. Install the CLI: `npm install -g https://github.com/pronzzz/prismify/releases/latest/download/prismify.tgz` (or add it to your project's devDependencies).
 2. Build and install the extension:
    ```bash
    cd vscode-extension
